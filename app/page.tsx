@@ -157,7 +157,24 @@ export default function VerbaliaGame() {
         }
         case "GAME_STATE_CHANGED": {
           if (payload.gameState) setGameState(payload.gameState as GameState)
-          if (payload.gameState === "ACTIVE_GAME") setIsTimerRunning(true)
+          if (payload.gameState === "ACTIVE_GAME") {
+            setIsTimerRunning(true)
+            // Inicializar leaderboard con todos los jugadores conectados en 0
+            setScores((prev) => {
+              if (prev.length > 0) return prev
+              const playersMap = (payload.players ?? {}) as Record<
+                string,
+                { name: string; isReady: boolean; isConnected: boolean }
+              >
+              return Object.entries(playersMap).map(([id, p]) => ({
+                id,
+                name: p.name,
+                score: 0,
+                correctAnswers: 0,
+                rank: 1,
+              }))
+            })
+          }
           if (payload.gameState === "LOBBY") {
             setSelectedCategory(null)
             setHasVoted(false)
@@ -168,6 +185,7 @@ export default function VerbaliaGame() {
             setTimeLeft(30)
             setIsTimerRunning(false)
             setCurrentTurnHolder(null)
+            setScores([])
           }
           break
         }
@@ -178,13 +196,31 @@ export default function VerbaliaGame() {
           break
         }
         case "TURN_REQUESTED": {
-          setCurrentTurnHolder((payload.currentTurnHolder as string) ?? data.playerId)
+          const holder = (payload.currentTurnHolder as string) ?? data.playerId
+          setCurrentTurnHolder(holder)
+          setTimeLeft(30)
+          setIsTimerRunning(true)
           break
         }
         case "TURN_RELEASED":
         case "ANSWER_SUBMITTED": {
           setCurrentTurnHolder(null)
           if (data.type === "ANSWER_SUBMITTED" && data.playerId !== myId) {
+            // Actualizar puntaje del jugador remoto en el leaderboard
+            const isCorrect = payload.isCorrect as boolean
+            if (isCorrect) {
+              setScores((prev) => {
+                const exists = prev.some((p) => p.id === data.playerId)
+                const base = exists
+                  ? prev
+                  : [...prev, { id: data.playerId, name: data.playerName ?? data.playerId, score: 0, correctAnswers: 0, rank: prev.length + 1 }]
+                return base.map((p) =>
+                  p.id === data.playerId
+                    ? { ...p, score: p.score + 1, correctAnswers: p.correctAnswers + 1 }
+                    : p
+                )
+              })
+            }
             setIsTransitioning(true)
             setTimeLeft(30)
             setTimeout(() => {
@@ -285,13 +321,17 @@ export default function VerbaliaGame() {
         [currentLetter]: isCorrect ? "correct" : "error",
       }))
       if (isCorrect) {
-        setScores((prev) =>
-          prev.map((p) =>
+        setScores((prev) => {
+          const exists = prev.some((p) => p.id === myId)
+          const base = exists
+            ? prev
+            : [...prev, { id: myId, name: myName, score: 0, correctAnswers: 0, rank: prev.length + 1 }]
+          return base.map((p) =>
             p.id === myId
-              ? { ...p, score: p.score + 10, correctAnswers: p.correctAnswers + 1 }
-              : { ...p, score: p.score + Math.floor(Math.random() * 15), correctAnswers: p.correctAnswers + (Math.random() > 0.4 ? 1 : 0) }
+              ? { ...p, score: p.score + 1, correctAnswers: p.correctAnswers + 1 }
+              : p
           )
-        )
+        })
       }
       emitEvent("ANSWER_SUBMITTED", { answer, isCorrect, letter: currentLetter, letterIndex: currentLetterIndex })
       setCurrentTurnHolder(null)
@@ -307,7 +347,7 @@ export default function VerbaliaGame() {
         }
       }, 500)
     },
-    [currentLetter, currentLetterIndex, myId, emitEvent]
+    [currentLetter, currentLetterIndex, myId, myName, emitEvent]
   )
 
   const handlePlayAgain = useCallback(() => {
@@ -322,6 +362,13 @@ export default function VerbaliaGame() {
     isHost: id === Object.keys(players)[0],
     isReady: p.isReady,
   }))
+
+  // Fusionar players con scores: garantiza que TODOS los jugadores
+  // conectados aparezcan en el leaderboard, incluso si aún no tienen puntos.
+  const scoreMap = new Map(scores.map((s) => [s.id, s]))
+  const liveScores = Object.entries(players)
+    .filter(([, p]) => p.isConnected)
+    .map(([id, p], i) => scoreMap.get(id) ?? { id, name: p.name, score: 0, correctAnswers: 0, rank: i + 1 })
 
   const iAmHost = playersList[0]?.id === myId
   const isTurnBlocked = currentTurnHolder !== null && currentTurnHolder !== myId
@@ -413,6 +460,8 @@ export default function VerbaliaGame() {
             isTurnBlocked={isTurnBlocked}
             isTurnHolder={currentTurnHolder === myId}
             onRequestTurn={handleRequestTurn}
+            scores={liveScores}
+            myId={myId}
           />
         )}
         {gameState === "RESULTS" && (
