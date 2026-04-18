@@ -1,24 +1,18 @@
 "use client"
 
-import { useState, useCallback, useEffect } from "react"
+import { useState, useCallback, useEffect, useRef } from "react"
 import { LobbyScreen } from "@/components/screens/lobby-screen"
 import { VotingScreen } from "@/components/screens/voting-screen"
 import { ReadyCheckScreen } from "@/components/screens/ready-check-screen"
 import { ActiveGameScreen } from "@/components/screens/active-game-screen"
 import { ResultsScreen } from "@/components/screens/results-screen"
 import { LetterState } from "@/components/game/keyboard"
-import { Terminal, Gamepad2 } from "lucide-react"
+import { Terminal, Gamepad2, Wifi, WifiOff } from "lucide-react"
+import type { GameEvent, GameEventType } from "@/app/api/game/route"
 
 type GameState = "LOBBY" | "VOTING" | "READY_CHECK" | "ACTIVE_GAME" | "RESULTS"
 
 const ALPHABET = "ABCDEFGHIJKLMNÑOPQRSTUVWXYZ".split("")
-
-const MOCK_PLAYERS = [
-  { id: "1", name: "Jugador_01", isConnected: true, isHost: true, isReady: false },
-  { id: "2", name: "Jugador_02", isConnected: true, isHost: false, isReady: false },
-  { id: "3", name: "Jugador_03", isConnected: true, isHost: false, isReady: false },
-  { id: "4", name: "Jugador_04", isConnected: false, isHost: false, isReady: false },
-]
 
 const CATEGORIES = [
   "PAÍSES DEL MUNDO",
@@ -35,274 +29,302 @@ interface WordDefinition {
 }
 
 const DEFINITIONS: Record<string, WordDefinition> = {
-  A: { 
-    definition: "País sudamericano famoso por el tango, el asado y ser la tierra natal de Maradona y Messi.", 
-    answer: "ARGENTINA",
-    type: "empieza"
-  },
-  B: { 
-    definition: "País sudamericano más grande del continente, conocido por el Carnaval de Río y la selva amazónica.", 
-    answer: "BRASIL",
-    type: "empieza"
-  },
-  C: { 
-    definition: "País sudamericano largo y angosto, famoso por sus vinos, el desierto de Atacama y la Patagonia.", 
-    answer: "CHILE",
-    type: "empieza"
-  },
-  D: { 
-    definition: "País escandinavo conocido por sus diseños, la Sirenita de Copenhague y ser la tierra de los vikingos.", 
-    answer: "DINAMARCA",
-    type: "empieza"
-  },
-  E: { 
-    definition: "País europeo de la península ibérica, famoso por el flamenco, las tapas y la Sagrada Familia.", 
-    answer: "ESPAÑA",
-    type: "empieza"
-  },
-  F: { 
-    definition: "País europeo conocido por la Torre Eiffel, el vino, el queso y la haute couture.", 
-    answer: "FRANCIA",
-    type: "empieza"
-  },
-  G: { 
-    definition: "País europeo cuna de la democracia y la filosofía, con monumentos como el Partenón en Atenas.", 
-    answer: "GRECIA",
-    type: "empieza"
-  },
-  H: { 
-    definition: "País centroamericano con costas en el Caribe y el Pacífico, famoso por sus ruinas mayas de Copán.", 
-    answer: "HONDURAS",
-    type: "empieza"
-  },
-  I: { 
-    definition: "País europeo con forma de bota, cuna del Renacimiento, la pizza y el Coliseo Romano.", 
-    answer: "ITALIA",
-    type: "empieza"
-  },
-  J: { 
-    definition: "País asiático insular conocido por los samuráis, el sushi, el anime y el Monte Fuji.", 
-    answer: "JAPÓN",
-    type: "empieza"
-  },
-  K: { 
-    definition: "País africano famoso por sus safaris, el Monte Kilimanjaro (en su frontera) y los maasáis.", 
-    answer: "KENIA",
-    type: "empieza"
-  },
-  L: { 
-    definition: "Pequeño país europeo sin salida al mar, ubicado entre Bélgica, Francia y Alemania, conocido por sus bancos.", 
-    answer: "LUXEMBURGO",
-    type: "empieza"
-  },
-  M: { 
-    definition: "País norteamericano famoso por sus tacos, mariachis, pirámides aztecas y playas del Caribe.", 
-    answer: "MÉXICO",
-    type: "empieza"
-  },
-  N: { 
-    definition: "País escandinavo de los fiordos, la aurora boreal y las noches polares, tierra de los vikingos.", 
-    answer: "NORUEGA",
-    type: "empieza"
-  },
-  Ñ: { 
-    definition: "País ibérico cuyo nombre contiene la letra más característica del idioma español.", 
-    answer: "ESPAÑA",
-    type: "contiene"
-  },
-  O: { 
-    definition: "Sultanato de la península arábiga, conocido por sus paisajes desérticos y su capital Mascate.", 
-    answer: "OMÁN",
-    type: "empieza"
-  },
-  P: { 
-    definition: "País sudamericano andino, cuna del Imperio Inca, famoso por Machu Picchu y el ceviche.", 
-    answer: "PERÚ",
-    type: "empieza"
-  },
-  Q: { 
-    definition: "Pequeño emirato árabe muy rico en petróleo y gas, sede de la Copa Mundial de Fútbol 2022.", 
-    answer: "CATAR",
-    type: "contiene"
-  },
-  R: { 
-    definition: "País más grande del mundo por territorio, abarca Europa y Asia, conocido por el Kremlin y la Plaza Roja.", 
-    answer: "RUSIA",
-    type: "empieza"
-  },
-  S: { 
-    definition: "País escandinavo conocido por IKEA, ABBA, los premios Nobel y sus extensos bosques.", 
-    answer: "SUECIA",
-    type: "empieza"
-  },
-  T: { 
-    definition: "País transcontinental entre Europa y Asia, famoso por Estambul, la Capadocia y los kebabs.", 
-    answer: "TURQUÍA",
-    type: "empieza"
-  },
-  U: { 
-    definition: "País sudamericano pequeño entre Argentina y Brasil, famoso por su mate y sus playas de Punta del Este.", 
-    answer: "URUGUAY",
-    type: "empieza"
-  },
-  V: { 
-    definition: "País sudamericano caribeño con grandes reservas de petróleo, tierra del Salto Ángel.", 
-    answer: "VENEZUELA",
-    type: "empieza"
-  },
-  W: { 
-    definition: "País africano sin salida al mar, anteriormente llamado Suazilandia, es una monarquía absoluta.", 
-    answer: "ESWATINI",
-    type: "contiene"
-  },
-  X: { 
-    definition: "Pequeño país europeo entre Bélgica, Francia y Alemania, su nombre contiene una X.", 
-    answer: "LUXEMBURGO",
-    type: "contiene"
-  },
-  Y: { 
-    definition: "País de la península arábiga en el extremo sur, conocido por sus antiguas ciudades amuralladas.", 
-    answer: "YEMEN",
-    type: "empieza"
-  },
-  Z: { 
-    definition: "País africano del sur conocido por las Cataratas Victoria y sus safaris de fauna salvaje.", 
-    answer: "ZIMBABUE",
-    type: "empieza"
-  },
+  A: { definition: "País sudamericano famoso por el tango, el asado y ser la tierra natal de Maradona y Messi.", answer: "ARGENTINA", type: "empieza" },
+  B: { definition: "País sudamericano más grande del continente, conocido por el Carnaval de Río y la selva amazónica.", answer: "BRASIL", type: "empieza" },
+  C: { definition: "País sudamericano largo y angosto, famoso por sus vinos, el desierto de Atacama y la Patagonia.", answer: "CHILE", type: "empieza" },
+  D: { definition: "País escandinavo conocido por sus diseños, la Sirenita de Copenhague y ser la tierra de los vikingos.", answer: "DINAMARCA", type: "empieza" },
+  E: { definition: "País europeo de la península ibérica, famoso por el flamenco, las tapas y la Sagrada Familia.", answer: "ESPAÑA", type: "empieza" },
+  F: { definition: "País europeo conocido por la Torre Eiffel, el vino, el queso y la haute couture.", answer: "FRANCIA", type: "empieza" },
+  G: { definition: "País europeo cuna de la democracia y la filosofía, con monumentos como el Partenón en Atenas.", answer: "GRECIA", type: "empieza" },
+  H: { definition: "País centroamericano con costas en el Caribe y el Pacífico, famoso por sus ruinas mayas de Copán.", answer: "HONDURAS", type: "empieza" },
+  I: { definition: "País europeo con forma de bota, cuna del Renacimiento, la pizza y el Coliseo Romano.", answer: "ITALIA", type: "empieza" },
+  J: { definition: "País asiático insular conocido por los samuráis, el sushi, el anime y el Monte Fuji.", answer: "JAPÓN", type: "empieza" },
+  K: { definition: "País africano famoso por sus safaris, el Monte Kilimanjaro (en su frontera) y los maasáis.", answer: "KENIA", type: "empieza" },
+  L: { definition: "Pequeño país europeo sin salida al mar, ubicado entre Bélgica, Francia y Alemania, conocido por sus bancos.", answer: "LUXEMBURGO", type: "empieza" },
+  M: { definition: "País norteamericano famoso por sus tacos, mariachis, pirámides aztecas y playas del Caribe.", answer: "MÉXICO", type: "empieza" },
+  N: { definition: "País escandinavo de los fiordos, la aurora boreal y las noches polares, tierra de los vikingos.", answer: "NORUEGA", type: "empieza" },
+  Ñ: { definition: "País ibérico cuyo nombre contiene la letra más característica del idioma español.", answer: "ESPAÑA", type: "contiene" },
+  O: { definition: "Sultanato de la península arábiga, conocido por sus paisajes desérticos y su capital Mascate.", answer: "OMÁN", type: "empieza" },
+  P: { definition: "País sudamericano andino, cuna del Imperio Inca, famoso por Machu Picchu y el ceviche.", answer: "PERÚ", type: "empieza" },
+  Q: { definition: "Pequeño emirato árabe muy rico en petróleo y gas, sede de la Copa Mundial de Fútbol 2022.", answer: "CATAR", type: "contiene" },
+  R: { definition: "País más grande del mundo por territorio, abarca Europa y Asia, conocido por el Kremlin y la Plaza Roja.", answer: "RUSIA", type: "empieza" },
+  S: { definition: "País escandinavo conocido por IKEA, ABBA, los premios Nobel y sus extensos bosques.", answer: "SUECIA", type: "empieza" },
+  T: { definition: "País transcontinental entre Europa y Asia, famoso por Estambul, la Capadocia y los kebabs.", answer: "TURQUÍA", type: "empieza" },
+  U: { definition: "País sudamericano pequeño entre Argentina y Brasil, famoso por su mate y sus playas de Punta del Este.", answer: "URUGUAY", type: "empieza" },
+  V: { definition: "País sudamericano caribeño con grandes reservas de petróleo, tierra del Salto Ángel.", answer: "VENEZUELA", type: "empieza" },
+  W: { definition: "País africano sin salida al mar, anteriormente llamado Suazilandia, es una monarquía absoluta.", answer: "ESWATINI", type: "contiene" },
+  X: { definition: "Pequeño país europeo entre Bélgica, Francia y Alemania, su nombre contiene una X.", answer: "LUXEMBURGO", type: "contiene" },
+  Y: { definition: "País de la península arábiga en el extremo sur, conocido por sus antiguas ciudades amuralladas.", answer: "YEMEN", type: "empieza" },
+  Z: { definition: "País africano del sur conocido por las Cataratas Victoria y sus safaris de fauna salvaje.", answer: "ZIMBABUE", type: "empieza" },
 }
 
+// ─────────────────────────────────────────────
+// Helpers — solo se llaman en el cliente
+// ─────────────────────────────────────────────
+
+function getPlayerId(): string {
+  let id = sessionStorage.getItem("verbalia_player_id")
+  if (!id) {
+    id = `player-${Math.random().toString(36).slice(2, 8)}`
+    sessionStorage.setItem("verbalia_player_id", id)
+  }
+  return id
+}
+
+function getPlayerName(): string {
+  let name = sessionStorage.getItem("verbalia_player_name")
+  if (!name) {
+    name = `Jugador_${Math.random().toString(36).slice(2, 5).toUpperCase()}`
+    sessionStorage.setItem("verbalia_player_name", name)
+  }
+  return name
+}
+
+const ROOM_ID = "VERB-2024"
+
+// ─────────────────────────────────────────────
+// Componente principal
+// ─────────────────────────────────────────────
+
 export default function VerbaliaGame() {
+  // FIX HYDRATION: iniciar vacío, llenar solo en el cliente via useEffect
+  const [myId, setMyId] = useState<string>("")
+  const [myName, setMyName] = useState<string>("")
+
   const [gameState, setGameState] = useState<GameState>("LOBBY")
-  const [players, setPlayers] = useState(MOCK_PLAYERS)
+  const [players, setPlayers] = useState<
+    Record<string, { name: string; isReady: boolean; isConnected: boolean }>
+  >({})
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
-  const [hasVoted, setHasVoted] = useState(false)
   const [votes, setVotes] = useState<Record<string, number>>({})
+  const [hasVoted, setHasVoted] = useState(false)
   const [isReady, setIsReady] = useState(false)
   const [currentLetterIndex, setCurrentLetterIndex] = useState(0)
   const [letterStates, setLetterStates] = useState<Record<string, LetterState>>({})
   const [isTransitioning, setIsTransitioning] = useState(false)
   const [timeLeft, setTimeLeft] = useState(30)
   const [isTimerRunning, setIsTimerRunning] = useState(false)
-  const [scores, setScores] = useState([
-    { id: "1", name: "Jugador_01", score: 0, correctAnswers: 0, rank: 1 },
-    { id: "2", name: "Jugador_02", score: 0, correctAnswers: 0, rank: 2 },
-    { id: "3", name: "Jugador_03", score: 0, correctAnswers: 0, rank: 3 },
-  ])
+  const [scores, setScores] = useState<
+    { id: string; name: string; score: number; correctAnswers: number; rank: number }[]
+  >([])
+  const [currentTurnHolder, setCurrentTurnHolder] = useState<string | null>(null)
+  const [isConnected, setIsConnected] = useState(false)
 
+  const eventSourceRef = useRef<EventSource | null>(null)
   const currentLetter = ALPHABET[currentLetterIndex]
 
-  // Auto-advance after voting
+  // ── PASO 1: Cargar ID/nombre del cliente después del montaje ──
   useEffect(() => {
-    if (hasVoted && gameState === "VOTING") {
-      const timer = setTimeout(() => {
-        setGameState("READY_CHECK")
-      }, 2000)
-      return () => clearTimeout(timer)
-    }
-  }, [hasVoted, gameState])
+    setMyId(getPlayerId())
+    setMyName(getPlayerName())
+  }, [])
 
-  // Auto-start game when all ready
+  // ── Emitir eventos al servidor ──
+  const emitEvent = useCallback(
+    async (type: GameEventType, payload?: Record<string, unknown>) => {
+      if (!myId) return
+      const event: Omit<GameEvent, "timestamp"> = {
+        type,
+        roomId: ROOM_ID,
+        playerId: myId,
+        playerName: myName,
+        payload,
+      }
+      await fetch("/api/game", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(event),
+      })
+    },
+    [myId, myName]
+  )
+
+  // ── Procesar mensajes SSE ──
+  const handleSSEMessage = useCallback(
+    (event: MessageEvent) => {
+      const data = JSON.parse(event.data) as GameEvent
+      if (data.type === "HEARTBEAT") return
+
+      const payload = data.payload ?? {}
+
+      switch (data.type) {
+        case "PLAYER_JOINED":
+        case "PLAYER_LEFT":
+        case "PLAYER_READY": {
+          if (payload.players) setPlayers(payload.players as typeof players)
+          if (payload.gameState) setGameState(payload.gameState as GameState)
+          break
+        }
+        case "GAME_STATE_CHANGED": {
+          if (payload.gameState) setGameState(payload.gameState as GameState)
+          if (payload.gameState === "ACTIVE_GAME") setIsTimerRunning(true)
+          if (payload.gameState === "LOBBY") {
+            setSelectedCategory(null)
+            setHasVoted(false)
+            setVotes({})
+            setIsReady(false)
+            setCurrentLetterIndex(0)
+            setLetterStates({})
+            setTimeLeft(30)
+            setIsTimerRunning(false)
+            setCurrentTurnHolder(null)
+          }
+          break
+        }
+        case "VOTE_CAST": {
+          if (payload.votes) setVotes(payload.votes as Record<string, number>)
+          if (payload.selectedCategory) setSelectedCategory(payload.selectedCategory as string)
+          if (payload.gameState) setGameState(payload.gameState as GameState)
+          break
+        }
+        case "TURN_REQUESTED": {
+          setCurrentTurnHolder((payload.currentTurnHolder as string) ?? data.playerId)
+          break
+        }
+        case "TURN_RELEASED":
+        case "ANSWER_SUBMITTED": {
+          setCurrentTurnHolder(null)
+          if (data.type === "ANSWER_SUBMITTED" && data.playerId !== myId) {
+            setIsTransitioning(true)
+            setTimeLeft(30)
+            setTimeout(() => {
+              setCurrentLetterIndex((prev) => {
+                if (prev < 7) { setIsTransitioning(false); return prev + 1 }
+                setGameState("RESULTS")
+                setIsTimerRunning(false)
+                return prev
+              })
+            }, 500)
+          }
+          break
+        }
+      }
+    },
+    [myId]
+  )
+
+  // ── PASO 2: Abrir SSE cuando myId esté listo ──
   useEffect(() => {
-    const allReady = players.filter(p => p.isConnected).every(p => p.isReady)
-    if (allReady && gameState === "READY_CHECK" && isReady) {
-      const timer = setTimeout(() => {
-        setGameState("ACTIVE_GAME")
-        setIsTimerRunning(true)
-      }, 1500)
-      return () => clearTimeout(timer)
+    if (!myId || !myName) return       // esperar hidratación
+    if (eventSourceRef.current) return // evitar duplicados
+
+    const url = `/api/game?roomId=${ROOM_ID}&playerId=${myId}&playerName=${encodeURIComponent(myName)}`
+    const es = new EventSource(url)
+    eventSourceRef.current = es
+
+    es.onopen = () => setIsConnected(true)
+    es.onerror = () => setIsConnected(false)
+    es.onmessage = handleSSEMessage
+
+    return () => {
+      es.close()
+      eventSourceRef.current = null
+      setIsConnected(false)
     }
-  }, [players, gameState, isReady])
+  }, [myId, myName]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Actualizar handler sin reabrir la conexión
+  useEffect(() => {
+    if (!eventSourceRef.current) return
+    eventSourceRef.current.onmessage = handleSSEMessage
+  }, [handleSSEMessage])
+
+  // ── Timer local ──
+  useEffect(() => {
+    if (!isTimerRunning || timeLeft <= 0) return
+    const interval = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) { clearInterval(interval); return 0 }
+        return prev - 1
+      })
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [isTimerRunning, timeLeft])
+
+  // ── Handlers ──
 
   const handleStartGame = useCallback(() => {
-    setGameState("VOTING")
-  }, [])
+    emitEvent("GAME_STATE_CHANGED", { gameState: "VOTING" })
+  }, [emitEvent])
 
-  const handleVote = useCallback((category: string) => {
-    setSelectedCategory(category)
-    setVotes(prev => ({
-      ...prev,
-      [category]: (prev[category] || 0) + 1
-    }))
-    setHasVoted(true)
-  }, [])
+  const handleVote = useCallback(
+    (category: string) => {
+      if (hasVoted) return
+      setSelectedCategory(category)
+      setHasVoted(true)
+      emitEvent("VOTE_CAST", { category })
+    },
+    [hasVoted, emitEvent]
+  )
 
   const handleToggleReady = useCallback(() => {
-    setIsReady(prev => !prev)
-    setPlayers(prev => 
-      prev.map(p => p.id === "1" ? { ...p, isReady: !p.isReady } : p)
-    )
-    
-    // Simulate other players becoming ready
-    if (!isReady) {
-      setTimeout(() => {
-        setPlayers(prev => 
-          prev.map(p => ({ ...p, isReady: p.isConnected }))
+    const next = !isReady
+    setIsReady(next)
+    emitEvent("PLAYER_READY", { isReady: next })
+  }, [isReady, emitEvent])
+
+  const handleRequestTurn = useCallback(async () => {
+    const res = await fetch("/api/game", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "TURN_REQUESTED",
+        roomId: ROOM_ID,
+        playerId: myId,
+        playerName: myName,
+      } satisfies Omit<GameEvent, "timestamp">),
+    })
+    if (!res.ok) console.warn("Turno denegado")
+  }, [myId, myName])
+
+  const handleSubmitAnswer = useCallback(
+    (answer: string) => {
+      const isCorrect = Math.random() > 0.3
+      setLetterStates((prev) => ({
+        ...prev,
+        [currentLetter]: isCorrect ? "correct" : "error",
+      }))
+      if (isCorrect) {
+        setScores((prev) =>
+          prev.map((p) =>
+            p.id === myId
+              ? { ...p, score: p.score + 10, correctAnswers: p.correctAnswers + 1 }
+              : { ...p, score: p.score + Math.floor(Math.random() * 15), correctAnswers: p.correctAnswers + (Math.random() > 0.4 ? 1 : 0) }
+          )
         )
-      }, 1000)
-    }
-  }, [isReady])
-
-  const handleSubmitAnswer = useCallback((answer: string) => {
-    // Simulate correct/incorrect answer (70% chance correct for demo)
-    const isCorrect = Math.random() > 0.3
-    
-    setLetterStates(prev => ({
-      ...prev,
-      [currentLetter]: isCorrect ? "correct" : "error"
-    }))
-
-    // Update scores
-    if (isCorrect) {
-      setScores(prev => 
-        prev.map(p => 
-          p.id === "1" 
-            ? { 
-                ...p, 
-                score: p.score + 10, 
-                correctAnswers: p.correctAnswers + 1 
-              } 
-            : {
-                ...p,
-                score: p.score + Math.floor(Math.random() * 15),
-                correctAnswers: p.correctAnswers + (Math.random() > 0.4 ? 1 : 0)
-              }
-        )
-      )
-    }
-
-    // Transition to next letter
-    setIsTransitioning(true)
-    setTimeLeft(30)
-
-    setTimeout(() => {
-      if (currentLetterIndex < 7) { // Play 8 letters for demo
-        setCurrentLetterIndex(prev => prev + 1)
-        setIsTransitioning(false)
-      } else {
-        setGameState("RESULTS")
-        setIsTimerRunning(false)
       }
-    }, 500)
-  }, [currentLetter, currentLetterIndex])
+      emitEvent("ANSWER_SUBMITTED", { answer, isCorrect, letter: currentLetter, letterIndex: currentLetterIndex })
+      setCurrentTurnHolder(null)
+      setIsTransitioning(true)
+      setTimeLeft(30)
+      setTimeout(() => {
+        if (currentLetterIndex < 7) {
+          setCurrentLetterIndex((prev) => prev + 1)
+          setIsTransitioning(false)
+        } else {
+          setGameState("RESULTS")
+          setIsTimerRunning(false)
+        }
+      }, 500)
+    },
+    [currentLetter, currentLetterIndex, myId, emitEvent]
+  )
 
   const handlePlayAgain = useCallback(() => {
-    setGameState("LOBBY")
-    setSelectedCategory(null)
-    setHasVoted(false)
-    setVotes({})
-    setIsReady(false)
-    setCurrentLetterIndex(0)
-    setLetterStates({})
-    setTimeLeft(30)
-    setIsTimerRunning(false)
-    setPlayers(MOCK_PLAYERS)
-    setScores([
-      { id: "1", name: "Jugador_01", score: 0, correctAnswers: 0, rank: 1 },
-      { id: "2", name: "Jugador_02", score: 0, correctAnswers: 0, rank: 2 },
-      { id: "3", name: "Jugador_03", score: 0, correctAnswers: 0, rank: 3 },
-    ])
-  }, [])
+    emitEvent("GAME_STATE_CHANGED", { gameState: "LOBBY" })
+  }, [emitEvent])
+
+  // ── Derivados ──
+  const playersList = Object.entries(players).map(([id, p]) => ({
+    id,
+    name: p.name,
+    isConnected: p.isConnected,
+    isHost: id === Object.keys(players)[0],
+    isReady: p.isReady,
+  }))
+
+  const iAmHost = playersList[0]?.id === myId
+  const isTurnBlocked = currentTurnHolder !== null && currentTurnHolder !== myId
 
   return (
     <main className="min-h-screen bg-background flex flex-col">
@@ -311,13 +333,26 @@ export default function VerbaliaGame() {
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Gamepad2 className="w-6 h-6 text-primary" />
-            <h1 className="text-xl font-bold text-foreground tracking-widest">
-              VERBALIA
-            </h1>
+            <h1 className="text-xl font-bold text-foreground tracking-widest">VERBALIA</h1>
           </div>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Terminal className="w-4 h-4" />
-            <span className="uppercase tracking-widest">v1.0.0</span>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 text-xs">
+              {isConnected ? (
+                <>
+                  <Wifi className="w-4 h-4 text-accent" />
+                  <span className="text-accent uppercase tracking-widest">EN LÍNEA</span>
+                </>
+              ) : (
+                <>
+                  <WifiOff className="w-4 h-4 text-destructive" />
+                  <span className="text-destructive uppercase tracking-widest">DESCONECTADO</span>
+                </>
+              )}
+            </div>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Terminal className="w-4 h-4" />
+              <span className="uppercase tracking-widest">{myName || "..."}</span>
+            </div>
           </div>
         </div>
       </header>
@@ -327,15 +362,11 @@ export default function VerbaliaGame() {
         <div className="max-w-4xl mx-auto px-4 py-2 flex items-center gap-4 overflow-x-auto">
           {(["LOBBY", "VOTING", "READY_CHECK", "ACTIVE_GAME", "RESULTS"] as GameState[]).map((state, index) => (
             <div key={state} className="flex items-center gap-2">
-              <div 
-                className={`w-2 h-2 ${
-                  gameState === state 
-                    ? "bg-primary" 
-                    : (["LOBBY", "VOTING", "READY_CHECK", "ACTIVE_GAME", "RESULTS"].indexOf(gameState) > index 
-                      ? "bg-accent" 
-                      : "bg-muted")
-                }`}
-              />
+              <div className={`w-2 h-2 ${
+                gameState === state ? "bg-primary"
+                  : ["LOBBY", "VOTING", "READY_CHECK", "ACTIVE_GAME", "RESULTS"].indexOf(gameState) > index
+                    ? "bg-accent" : "bg-muted"
+              }`} />
               <span className={`text-xs uppercase tracking-wider whitespace-nowrap ${
                 gameState === state ? "text-primary" : "text-muted-foreground"
               }`}>
@@ -346,55 +377,46 @@ export default function VerbaliaGame() {
         </div>
       </div>
 
-      {/* Game Content */}
+      {/* Banner de turno */}
+      {gameState === "ACTIVE_GAME" && currentTurnHolder && (
+        <div className="border-b border-primary/30 bg-primary/5">
+          <div className="max-w-4xl mx-auto px-4 py-2 text-center text-xs text-primary uppercase tracking-widest">
+            {currentTurnHolder === myId
+              ? "⚡ ES TU TURNO — escribe tu respuesta"
+              : `🔒 ${players[currentTurnHolder]?.name ?? "Otro jugador"} está respondiendo...`}
+          </div>
+        </div>
+      )}
+
+      {/* Contenido del juego */}
       <div className="flex-1 flex items-center justify-center p-6">
         {gameState === "LOBBY" && (
-          <LobbyScreen
-            players={players}
-            roomCode="VERB-2024"
-            onStartGame={handleStartGame}
-            isHost={true}
-          />
+          <LobbyScreen players={playersList} roomCode={ROOM_ID} onStartGame={handleStartGame} isHost={iAmHost} />
         )}
-
         {gameState === "VOTING" && (
-          <VotingScreen
-            categories={CATEGORIES}
-            selectedCategory={selectedCategory}
-            votes={votes}
-            onVote={handleVote}
-            hasVoted={hasVoted}
-          />
+          <VotingScreen categories={CATEGORIES} selectedCategory={selectedCategory} votes={votes} onVote={handleVote} hasVoted={hasVoted} />
         )}
-
         {gameState === "READY_CHECK" && (
-          <ReadyCheckScreen
-            players={players.filter(p => p.isConnected)}
-            isReady={isReady}
-            category={selectedCategory || "PAÍSES DEL MUNDO"}
-            onToggleReady={handleToggleReady}
-          />
+          <ReadyCheckScreen players={playersList.filter((p) => p.isConnected)} isReady={isReady} category={selectedCategory ?? "PAÍSES DEL MUNDO"} onToggleReady={handleToggleReady} />
         )}
-
         {gameState === "ACTIVE_GAME" && (
           <ActiveGameScreen
             currentLetter={currentLetter}
             letterStates={letterStates}
-            definition={DEFINITIONS[currentLetter]?.definition || "Definición no disponible para esta letra."}
-            category={selectedCategory || "PAÍSES DEL MUNDO"}
+            definition={DEFINITIONS[currentLetter]?.definition ?? "Definición no disponible."}
+            category={selectedCategory ?? "PAÍSES DEL MUNDO"}
             timeLeft={timeLeft}
             isTimerRunning={isTimerRunning}
             isTransitioning={isTransitioning}
-            letterType={DEFINITIONS[currentLetter]?.type || "empieza"}
+            letterType={DEFINITIONS[currentLetter]?.type ?? "empieza"}
             onSubmitAnswer={handleSubmitAnswer}
+            isTurnBlocked={isTurnBlocked}
+            isTurnHolder={currentTurnHolder === myId}
+            onRequestTurn={handleRequestTurn}
           />
         )}
-
         {gameState === "RESULTS" && (
-          <ResultsScreen
-            scores={scores}
-            onPlayAgain={handlePlayAgain}
-          />
+          <ResultsScreen scores={scores} onPlayAgain={handlePlayAgain} />
         )}
       </div>
 
@@ -402,7 +424,7 @@ export default function VerbaliaGame() {
       <footer className="border-t border-border p-3">
         <div className="max-w-4xl mx-auto text-center text-xs text-muted-foreground">
           <span className="uppercase tracking-widest">
-            Sistema de juego en línea
+            {playersList.filter((p) => p.isConnected).length} jugador(es) conectado(s) · {ROOM_ID}
           </span>
         </div>
       </footer>

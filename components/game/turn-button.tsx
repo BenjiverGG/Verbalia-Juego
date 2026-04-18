@@ -1,39 +1,64 @@
 "use client"
 
+/**
+ * components/game/turn-button.tsx
+ *
+ * CAMBIOS:
+ * - Recibe isTurnBlocked (otro jugador tiene el turno → botón deshabilitado)
+ * - Recibe isTurnHolder (yo tengo el turno → mostrar input de respuesta)
+ * - onRequestTurn se llama ANTES de mostrar el input, para que el servidor
+ *   pueda bloquear a los demás. El input aparece solo si el servidor lo concedió.
+ */
+
 import { useState } from "react"
 import { Send } from "lucide-react"
 
 interface TurnButtonProps {
   onSubmit: (answer: string) => void
+  /** Otro jugador ya tiene el turno → deshabilitar el botón para este jugador */
+  isTurnBlocked?: boolean
+  /** Este jugador es quien tiene el turno activo (servidor lo confirmó) */
+  isTurnHolder?: boolean
+  /** Llamar al servidor para pedir el turno */
+  onRequestTurn?: () => Promise<void>
   disabled?: boolean
 }
 
-export function TurnButton({ onSubmit, disabled = false }: TurnButtonProps) {
-  const [isInputMode, setIsInputMode] = useState(false)
+export function TurnButton({
+  onSubmit,
+  isTurnBlocked = false,
+  isTurnHolder = false,
+  onRequestTurn,
+  disabled = false,
+}: TurnButtonProps) {
   const [answer, setAnswer] = useState("")
+  const [isRequesting, setIsRequesting] = useState(false)
 
-  const handleRequestTurn = () => {
-    setIsInputMode(true)
+  const handleRequestTurn = async () => {
+    if (!onRequestTurn) return
+    setIsRequesting(true)
+    try {
+      await onRequestTurn()
+      // El input aparecerá automáticamente cuando isTurnHolder cambie a true
+      // (el servidor hace broadcast del evento TURN_REQUESTED)
+    } finally {
+      setIsRequesting(false)
+    }
   }
 
   const handleSubmit = () => {
     if (answer.trim()) {
       onSubmit(answer.trim())
       setAnswer("")
-      setIsInputMode(false)
     }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
-      handleSubmit()
-    } else if (e.key === "Escape") {
-      setIsInputMode(false)
-      setAnswer("")
-    }
+    if (e.key === "Enter") handleSubmit()
   }
 
-  if (isInputMode) {
+  // ── Modo input: el servidor confirmó que tengo el turno ──
+  if (isTurnHolder) {
     return (
       <div className="flex gap-2 w-full max-w-md">
         <input
@@ -43,7 +68,7 @@ export function TurnButton({ onSubmit, disabled = false }: TurnButtonProps) {
           onKeyDown={handleKeyDown}
           placeholder="Escribe tu respuesta..."
           autoFocus
-          className="flex-1 px-4 py-3 bg-input border-2 border-border text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none transition-colors"
+          className="flex-1 px-4 py-3 bg-input border-2 border-primary text-foreground placeholder:text-muted-foreground focus:outline-none transition-colors"
         />
         <button
           onClick={handleSubmit}
@@ -57,13 +82,20 @@ export function TurnButton({ onSubmit, disabled = false }: TurnButtonProps) {
     )
   }
 
+  // ── Modo botón ──
+  const isDisabled = disabled || isTurnBlocked || isRequesting
+
   return (
     <button
       onClick={handleRequestTurn}
-      disabled={disabled}
-      className="px-8 py-4 bg-secondary text-secondary-foreground border-2 border-border font-bold uppercase tracking-wider text-sm hover:bg-muted hover:border-primary disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+      disabled={isDisabled}
+      className="px-8 py-4 bg-secondary text-secondary-foreground border-2 border-border font-bold uppercase tracking-wider text-sm hover:bg-muted hover:border-primary disabled:opacity-40 disabled:cursor-not-allowed transition-all"
     >
-      PEDIR TURNO
+      {isRequesting
+        ? "SOLICITANDO..."
+        : isTurnBlocked
+          ? "TURNO OCUPADO"
+          : "PEDIR TURNO"}
     </button>
   )
 }

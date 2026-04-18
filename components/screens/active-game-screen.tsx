@@ -1,5 +1,11 @@
 "use client"
 
+/**
+ * components/screens/active-game-screen.tsx
+ *
+ * CAMBIOS: Pasa isTurnBlocked, isTurnHolder y onRequestTurn al TurnButton.
+ */
+
 import { LetterDice } from "@/components/game/letter-dice"
 import { Keyboard, LetterState } from "@/components/game/keyboard"
 import { InfoPanel } from "@/components/game/info-panel"
@@ -15,6 +21,10 @@ interface ActiveGameScreenProps {
   isTransitioning: boolean
   letterType: "empieza" | "contiene"
   onSubmitAnswer: (answer: string) => void
+  /** Props nuevas para sincronización de turno */
+  isTurnBlocked?: boolean
+  isTurnHolder?: boolean
+  onRequestTurn?: () => Promise<void>
 }
 
 export function ActiveGameScreen({
@@ -26,12 +36,14 @@ export function ActiveGameScreen({
   isTimerRunning,
   isTransitioning,
   letterType,
-  onSubmitAnswer
+  onSubmitAnswer,
+  isTurnBlocked = false,
+  isTurnHolder = false,
+  onRequestTurn,
 }: ActiveGameScreenProps) {
   return (
     <div className="flex flex-col items-center gap-10 w-full max-w-xl">
-      {/* Info Panel at top */}
-      <InfoPanel 
+      <InfoPanel
         definition={definition}
         category={category}
         timeLeft={timeLeft}
@@ -40,19 +52,18 @@ export function ActiveGameScreen({
         letterType={letterType}
       />
 
-      {/* Letter Dice */}
       <div className="py-4">
         <LetterDice letter={currentLetter} isTransitioning={isTransitioning} />
       </div>
 
-      {/* Turn Button */}
-      <TurnButton onSubmit={onSubmitAnswer} />
-
-      {/* Keyboard */}
-      <Keyboard 
-        letterStates={letterStates}
-        currentLetter={currentLetter}
+      <TurnButton
+        onSubmit={onSubmitAnswer}
+        isTurnBlocked={isTurnBlocked}
+        isTurnHolder={isTurnHolder}
+        onRequestTurn={onRequestTurn}
       />
+
+      <Keyboard letterStates={letterStates} currentLetter={currentLetter} />
     </div>
   )
 }
