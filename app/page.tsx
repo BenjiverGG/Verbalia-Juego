@@ -93,7 +93,7 @@ function getPlayerName(): string {
   return name
 }
 
-const ROOM_ID = "VERB-2024"
+const ROOM_ID = "Verbalia Juego"
 
 // ─────────────────────────────────────────────
 // Componente principal
@@ -403,7 +403,7 @@ export default function VerbaliaGame() {
   const handleKickPlayer = useCallback(
     (targetPlayerId: string) => {
       if (iAmHost && targetPlayerId !== myId) {
-        emitEvent("KICK_PLAYER" as GameEventType, { targetPlayerId })
+        emitEvent("PLAYER_KICKED" as GameEventType, { targetPlayerId })
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
