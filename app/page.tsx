@@ -59,21 +59,9 @@ const DEFINITIONS: Record<string, WordDefinition> = {
   Z: { definition: "País africano del sur conocido por las Cataratas Victoria y sus safaris de fauna salvaje.", answer: "ZIMBABUE", type: "empieza" },
 }
 
-// ─────────────────────────────────────────────
-// Helper: normaliza texto para comparación
-// (quita acentos, espacios extra y convierte a mayúsculas)
-// ─────────────────────────────────────────────
 function normalizeAnswer(text: string): string {
-  return text
-    .trim()
-    .toUpperCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
+  return text.trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
 }
-
-// ─────────────────────────────────────────────
-// Helpers — solo se llaman en el cliente
-// ─────────────────────────────────────────────
 
 function getPlayerId(): string {
   let id = sessionStorage.getItem("verbalia_player_id")
@@ -96,11 +84,34 @@ function getPlayerName(): string {
 const ROOM_ID = "Verbalia Juego"
 
 // ─────────────────────────────────────────────
-// Componente principal
+// Helper para avanzar letra (reutilizado en 2 lugares)
 // ─────────────────────────────────────────────
 
+function advanceLetter(
+  currentIndex: number,
+  setCurrentLetterIndex: React.Dispatch<React.SetStateAction<number>>,
+  setIsTransitioning: React.Dispatch<React.SetStateAction<boolean>>,
+  setGameState: React.Dispatch<React.SetStateAction<GameState>>,
+  setIsTimerRunning: React.Dispatch<React.SetStateAction<boolean>>,
+  setTimeLeft: React.Dispatch<React.SetStateAction<number>>,
+  setCurrentTurnHolder: React.Dispatch<React.SetStateAction<string | null>>
+) {
+  setCurrentTurnHolder(null)
+  setIsTransitioning(true)
+  setTimeLeft(30)
+  setTimeout(() => {
+    if (currentIndex < ALPHABET.length - 1) {
+      setCurrentLetterIndex(currentIndex + 1)
+      setIsTransitioning(false)
+    } else {
+      setGameState("RESULTS")
+      setIsTimerRunning(false)
+    }
+  }, 500)
+}
+
 export default function VerbaliaGame() {
-  // FIX HYDRATION: iniciar vacío, llenar solo en el cliente via useEffect
+  // FIX HYDRATION: vacío en SSR, se llena en cliente
   const [myId, setMyId] = useState<string>("")
   const [myName, setMyName] = useState<string>("")
 
@@ -108,6 +119,7 @@ export default function VerbaliaGame() {
   const [players, setPlayers] = useState<
     Record<string, { name: string; isReady: boolean; isConnected: boolean }>
   >({})
+  const [hostId, setHostId] = useState<string | null>(null)
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [votes, setVotes] = useState<Record<string, number>>({})
   const [hasVoted, setHasVoted] = useState(false)
@@ -120,32 +132,38 @@ export default function VerbaliaGame() {
   const [scores, setScores] = useState<PlayerScore[]>([])
   const [currentTurnHolder, setCurrentTurnHolder] = useState<string | null>(null)
   const [isConnected, setIsConnected] = useState(false)
-  const [hostId, setHostId] = useState<string | null>(null)
+
+  // BUG 4: timer de votación visible en la UI
+  const [votingTimeLeft, setVotingTimeLeft] = useState<number>(15)
+  const [isVotingTimerRunning, setIsVotingTimerRunning] = useState(false)
 
   const eventSourceRef = useRef<EventSource | null>(null)
+  // Ref para acceder al índice actual dentro de callbacks SSE (evita closures stale)
+  const currentLetterIndexRef = useRef(currentLetterIndex)
+  useEffect(() => { currentLetterIndexRef.current = currentLetterIndex }, [currentLetterIndex])
+
   const currentLetter = ALPHABET[currentLetterIndex]
 
-  // ── PASO 1: Cargar ID/nombre del cliente después del montaje ──
+  // Paso 1: cargar IDs en el cliente
   useEffect(() => {
     setMyId(getPlayerId())
     setMyName(getPlayerName())
   }, [])
 
-  // ── Emitir eventos al servidor ──
+  // ── Emitir eventos ──
   const emitEvent = useCallback(
     async (type: GameEventType, payload?: Record<string, unknown>) => {
       if (!myId) return
-      const event: Omit<GameEvent, "timestamp"> = {
-        type,
-        roomId: ROOM_ID,
-        playerId: myId,
-        playerName: myName,
-        payload,
-      }
       await fetch("/api/game", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(event),
+        body: JSON.stringify({
+          type,
+          roomId: ROOM_ID,
+          playerId: myId,
+          playerName: myName,
+          payload,
+        } satisfies Omit<GameEvent, "timestamp">),
       })
     },
     [myId, myName]
@@ -160,41 +178,81 @@ export default function VerbaliaGame() {
       const payload = data.payload ?? {}
 
       switch (data.type) {
+
         case "PLAYER_JOINED":
-        case "PLAYER_LEFT":
-        case "PLAYER_READY":
-        case "PLAYER_KICKED": {
+        case "PLAYER_LEFT": {
           if (payload.players) setPlayers(payload.players as typeof players)
           if (payload.hostId !== undefined) setHostId(payload.hostId as string | null)
           if (payload.gameState) setGameState(payload.gameState as GameState)
-          // Si me expulsaron a mí, recargar la página para volver al inicio
-          if (data.type === "PLAYER_KICKED" && data.playerId === myId) {
+          if (payload.currentTurnHolder !== undefined) {
+            setCurrentTurnHolder(payload.currentTurnHolder as string | null)
+          }
+          break
+        }
+
+        // BUG 3: jugador expulsado
+        case "PLAYER_KICKED": {
+          if (payload.players) setPlayers(payload.players as typeof players)
+          if (payload.hostId !== undefined) setHostId(payload.hostId as string | null)
+          if (payload.currentTurnHolder !== undefined) {
+            setCurrentTurnHolder(payload.currentTurnHolder as string | null)
+          }
+          // Si me expulsaron a mí, recargar
+          if ((payload.kicked === true && data.playerId === myId)) {
             window.location.reload()
             return
           }
           break
         }
+
+        // BUG 1: nuevo host
+        case "HOST_CHANGED": {
+          if (payload.newHostId) setHostId(payload.newHostId as string)
+          if (payload.players) setPlayers(payload.players as typeof players)
+          break
+        }
+
+        case "PLAYER_READY": {
+          if (payload.players) setPlayers(payload.players as typeof players)
+          if (payload.hostId !== undefined) setHostId(payload.hostId as string | null)
+          if (payload.gameState) {
+            setGameState(payload.gameState as GameState)
+            if (payload.gameState === "ACTIVE_GAME") {
+              setIsTimerRunning(true)
+              setTimeLeft(30)
+              setIsVotingTimerRunning(false)
+            }
+          }
+          break
+        }
+
         case "GAME_STATE_CHANGED": {
           if (payload.gameState) setGameState(payload.gameState as GameState)
           if (payload.hostId !== undefined) setHostId(payload.hostId as string | null)
+          if (payload.players) setPlayers(payload.players as typeof players)
+
+          if (payload.gameState === "VOTING") {
+            // BUG 4: arrancar timer de votación en el cliente
+            setVotingTimeLeft(15)
+            setIsVotingTimerRunning(true)
+            setHasVoted(false)
+            setVotes({})
+            setSelectedCategory(null)
+          }
+
           if (payload.gameState === "ACTIVE_GAME") {
             setIsTimerRunning(true)
-            // Inicializar leaderboard con todos los jugadores conectados en 0
+            setTimeLeft(30)
+            setIsVotingTimerRunning(false)
             setScores((prev) => {
               if (prev.length > 0) return prev
-              const playersMap = (payload.players ?? {}) as Record<
-                string,
-                { name: string; isReady: boolean; isConnected: boolean }
-              >
+              const playersMap = (payload.players ?? {}) as Record<string, { name: string; isReady: boolean; isConnected: boolean }>
               return Object.entries(playersMap).map(([id, p], i) => ({
-                id,
-                name: p.name,
-                score: 0,
-                correctAnswers: 0,
-                rank: i + 1,
+                id, name: p.name, score: 0, correctAnswers: 0, rank: i + 1,
               }))
             })
           }
+
           if (payload.gameState === "LOBBY") {
             setSelectedCategory(null)
             setHasVoted(false)
@@ -204,23 +262,30 @@ export default function VerbaliaGame() {
             setLetterStates({})
             setTimeLeft(30)
             setIsTimerRunning(false)
+            setIsVotingTimerRunning(false)
+            setVotingTimeLeft(15)
             setCurrentTurnHolder(null)
             setScores([])
           }
           break
         }
-        case "HOST_CHANGED": {
-          if (payload.newHostId !== undefined) setHostId(payload.newHostId as string)
-          if (payload.players) setPlayers(payload.players as typeof players)
-          break
-        }
+
         case "VOTE_CAST": {
           if (payload.votes) setVotes(payload.votes as Record<string, number>)
           if (payload.selectedCategory) setSelectedCategory(payload.selectedCategory as string)
-          if (payload.hostId !== undefined) setHostId(payload.hostId as string | null)
+          break
+        }
+
+        // BUG 4: el servidor decidió la categoría ganadora (timeout o todos votaron)
+        case "VOTING_TIMEOUT": {
+          setIsVotingTimerRunning(false)
+          setVotingTimeLeft(0)
+          if (payload.selectedCategory) setSelectedCategory(payload.selectedCategory as string)
+          if (payload.votes) setVotes(payload.votes as Record<string, number>)
           if (payload.gameState) setGameState(payload.gameState as GameState)
           break
         }
+
         case "TURN_REQUESTED": {
           const holder = (payload.currentTurnHolder as string) ?? data.playerId
           setCurrentTurnHolder(holder)
@@ -229,24 +294,24 @@ export default function VerbaliaGame() {
           setIsTimerRunning(true)
           break
         }
-        case "TURN_RELEASED":
+
+        case "TURN_RELEASED": {
+          setCurrentTurnHolder(null)
+          if (payload.hostId !== undefined) setHostId(payload.hostId as string | null)
+          break
+        }
+
         case "ANSWER_SUBMITTED": {
           setCurrentTurnHolder(null)
           if (payload.hostId !== undefined) setHostId(payload.hostId as string | null)
-          // Actualizar letterStates para TODOS los jugadores
-          if (data.type === "ANSWER_SUBMITTED") {
-            const letter = payload.letter as string | undefined
-            const isCorrect = payload.isCorrect as boolean | undefined
-            if (letter && typeof isCorrect === "boolean") {
-              setLetterStates((prev) => ({
-                ...prev,
-                [letter]: isCorrect ? "correct" : "error",
-              }))
-            }
+
+          const letter = payload.letter as string | undefined
+          const isCorrect = payload.isCorrect as boolean | undefined
+          if (letter && typeof isCorrect === "boolean") {
+            setLetterStates((prev) => ({ ...prev, [letter]: isCorrect ? "correct" : "error" }))
           }
-          if (data.type === "ANSWER_SUBMITTED" && data.playerId !== myId) {
-            // Actualizar puntaje del jugador remoto en el leaderboard
-            const isCorrect = payload.isCorrect as boolean
+
+          if (data.playerId !== myId) {
             if (isCorrect) {
               setScores((prev) => {
                 const exists = prev.some((p) => p.id === data.playerId)
@@ -260,17 +325,33 @@ export default function VerbaliaGame() {
                 )
               })
             }
-            setIsTransitioning(true)
-            setTimeLeft(30)
-            setTimeout(() => {
-              setCurrentLetterIndex((prev) => {
-                if (prev < ALPHABET.length - 1) { setIsTransitioning(false); return prev + 1 }
-                setGameState("RESULTS")
-                setIsTimerRunning(false)
-                return prev
-              })
-            }, 500)
+            // Avanzar letra para los demás jugadores
+            advanceLetter(
+              currentLetterIndexRef.current,
+              setCurrentLetterIndex,
+              setIsTransitioning,
+              setGameState,
+              setIsTimerRunning,
+              setTimeLeft,
+              setCurrentTurnHolder
+            )
           }
+          break
+        }
+
+        // BUG 2: el servidor indica que el tiempo de la letra terminó
+        case "LETTER_TIMEOUT": {
+          setCurrentTurnHolder(null)
+          // Avanzar letra para TODOS (incluso quien tenía el turno)
+          advanceLetter(
+            currentLetterIndexRef.current,
+            setCurrentLetterIndex,
+            setIsTransitioning,
+            setGameState,
+            setIsTimerRunning,
+            setTimeLeft,
+            setCurrentTurnHolder
+          )
           break
         }
       }
@@ -278,10 +359,10 @@ export default function VerbaliaGame() {
     [myId]
   )
 
-  // ── PASO 2: Abrir SSE cuando myId esté listo ──
+  // Paso 2: abrir SSE cuando myId esté listo
   useEffect(() => {
-    if (!myId || !myName) return       // esperar hidratación
-    if (eventSourceRef.current) return // evitar duplicados
+    if (!myId || !myName) return
+    if (eventSourceRef.current) return
 
     const url = `/api/game?roomId=${ROOM_ID}&playerId=${myId}&playerName=${encodeURIComponent(myName)}`
     const es = new EventSource(url)
@@ -298,13 +379,13 @@ export default function VerbaliaGame() {
     }
   }, [myId, myName]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Actualizar handler sin reabrir la conexión
   useEffect(() => {
     if (!eventSourceRef.current) return
     eventSourceRef.current.onmessage = handleSSEMessage
   }, [handleSSEMessage])
 
-  // ── Timer local ──
+  // ── BUG 2: Timer de letra — cuando llega a 0, el servidor manda LETTER_TIMEOUT ──
+  // El cliente solo necesita mostrar la cuenta regresiva; el servidor es quien avanza.
   useEffect(() => {
     if (!isTimerRunning || timeLeft <= 0) return
     const interval = setInterval(() => {
@@ -315,6 +396,18 @@ export default function VerbaliaGame() {
     }, 1000)
     return () => clearInterval(interval)
   }, [isTimerRunning, timeLeft])
+
+  // ── BUG 4: Timer de votación (visual, 15s) ──
+  useEffect(() => {
+    if (!isVotingTimerRunning || votingTimeLeft <= 0) return
+    const interval = setInterval(() => {
+      setVotingTimeLeft((prev) => {
+        if (prev <= 1) { clearInterval(interval); return 0 }
+        return prev - 1
+      })
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [isVotingTimerRunning, votingTimeLeft])
 
   // ── Handlers ──
 
@@ -358,7 +451,6 @@ export default function VerbaliaGame() {
 
   const handleSubmitAnswer = useCallback(
     (answer: string) => {
-      // ── Validación real contra DEFINITIONS ──
       const definition = DEFINITIONS[currentLetter]
       const isCorrect = definition
         ? normalizeAnswer(answer) === normalizeAnswer(definition.answer)
@@ -383,30 +475,30 @@ export default function VerbaliaGame() {
         })
       }
 
-      emitEvent("ANSWER_SUBMITTED", { answer, isCorrect, letter: currentLetter, letterIndex: currentLetterIndex })
-      setCurrentTurnHolder(null)
-      setIsTransitioning(true)
-      setTimeLeft(30)
-      setTimeout(() => {
-        if (currentLetterIndex < ALPHABET.length - 1) {
-          setCurrentLetterIndex((prev) => prev + 1)
-          setIsTransitioning(false)
-        } else {
-          setGameState("RESULTS")
-          setIsTimerRunning(false)
-        }
-      }, 500)
+      emitEvent("ANSWER_SUBMITTED", {
+        answer, isCorrect, letter: currentLetter, letterIndex: currentLetterIndex,
+      })
+
+      // Avanzar localmente para quien respondió
+      advanceLetter(
+        currentLetterIndex,
+        setCurrentLetterIndex,
+        setIsTransitioning,
+        setGameState,
+        setIsTimerRunning,
+        setTimeLeft,
+        setCurrentTurnHolder
+      )
     },
     [currentLetter, currentLetterIndex, myId, myName, emitEvent]
   )
 
+  // BUG 3: kick de jugador
   const handleKickPlayer = useCallback(
     (targetPlayerId: string) => {
-      if (iAmHost && targetPlayerId !== myId) {
-        emitEvent("PLAYER_KICKED" as GameEventType, { targetPlayerId })
-      }
+      if (targetPlayerId === myId) return
+      emitEvent("PLAYER_KICKED" as GameEventType, { targetPlayerId })
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [myId, emitEvent]
   )
 
@@ -423,8 +515,6 @@ export default function VerbaliaGame() {
     isReady: p.isReady,
   }))
 
-  // Fusionar players con scores: garantiza que TODOS los jugadores
-  // conectados aparezcan en el leaderboard, incluso si aún no tienen puntos.
   const scoreMap = new Map(scores.map((s) => [s.id, s]))
   const liveScores = Object.entries(players)
     .filter(([, p]) => p.isConnected)
@@ -516,6 +606,7 @@ export default function VerbaliaGame() {
             myId={myId}
           />
         )}
+
         {gameState === "VOTING" && (
           <VotingScreen
             categories={CATEGORIES}
@@ -523,8 +614,11 @@ export default function VerbaliaGame() {
             votes={votes}
             onVote={handleVote}
             hasVoted={hasVoted}
+            // BUG 4: pasar el timer de votación a la pantalla
+            timeLeft={votingTimeLeft}
           />
         )}
+
         {gameState === "READY_CHECK" && (
           <ReadyCheckScreen
             players={playersList.filter((p) => p.isConnected)}
@@ -533,6 +627,7 @@ export default function VerbaliaGame() {
             onToggleReady={handleToggleReady}
           />
         )}
+
         {gameState === "ACTIVE_GAME" && (
           <ActiveGameScreen
             currentLetter={currentLetter}
@@ -551,6 +646,7 @@ export default function VerbaliaGame() {
             myId={myId}
           />
         )}
+
         {gameState === "RESULTS" && (
           <ResultsScreen scores={scores} onPlayAgain={handlePlayAgain} />
         )}
